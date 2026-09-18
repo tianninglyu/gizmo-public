@@ -261,6 +261,9 @@ void begrun(void)
       All.ErrTolIntAccuracy = all.ErrTolIntAccuracy;
       All.MinGasHsmlFractional = all.MinGasHsmlFractional;
       All.MinGasTemp = all.MinGasTemp;
+#ifdef COOLING
+      All.CoolingRedshift = all.CoolingRedshift;
+#endif
 #ifdef CHIMES
       All.ChimesThermEvolOn = all.ChimesThermEvolOn;
 #endif
@@ -1362,6 +1365,13 @@ void read_parameter_file(char *fname)
       addr[nt] = &All.MinGasTemp;
       id[nt++] = REAL;
 
+#ifdef COOLING
+      strcpy(tag[nt], "CoolingRedshift");
+      strcpy(alternate_tag[nt], "Cooling_Redshift");
+      addr[nt] = &All.CoolingRedshift;
+      id[nt++] = REAL;
+#endif
+
 #ifdef GDE_DISTORTIONTENSOR
       strcpy(tag[nt], "DM_velocity_dispersion");
       addr[nt] = &All.DM_velocity_dispersion;
@@ -2188,6 +2198,9 @@ void read_parameter_file(char *fname)
 #endif
                 if(strcmp("InitGasTemp",tag[i])==0) {*((double *)addr[i])=0; printf("Tag %s (%s) not set in parameter file: defaulting to assume temperatures defined in ICs (=%g) \n",tag[i],alternate_tag[i],All.InitGasTemp); continue;}
                 if(strcmp("MinGasTemp",tag[i])==0) {*((double *)addr[i])=0; printf("Tag %s (%s) not set in parameter file: defaulting to assume no mininum (=%g) \n",tag[i],alternate_tag[i],All.MinGasTemp); continue;}
+#ifdef COOLING
+                if(strcmp("CoolingRedshift",tag[i])==0) {*((double *)addr[i])=0; printf("Tag %s (%s) not set in parameter file: defaulting to a z=0 cooling background (=%g) \n",tag[i],alternate_tag[i],All.CoolingRedshift); continue;}
+#endif
 #if defined(ADAPTIVE_GRAVSOFT_FORGAS) || defined(ADAPTIVE_GRAVSOFT_FORALL)
                 if(strcmp("MinGasHsmlFractional",tag[i])==0) {*((double *)addr[i])=1; printf("Tag %s (%s) not set in parameter file: defaulting to assume minimum matches the specified force softening (=%g) \n",tag[i],alternate_tag[i],All.MinGasHsmlFractional); continue;}
 #else
@@ -2278,6 +2291,14 @@ void read_parameter_file(char *fname)
                 errorFlag = 1;
             }
         }
+
+#ifdef COOLING
+        if((All.ComovingIntegrationOn == 0) && (All.CoolingRedshift < 0))
+        {
+            printf("ERROR. CoolingRedshift must be non-negative for a non-cosmological simulation (received %g).\n", All.CoolingRedshift);
+            errorFlag = 1;
+        }
+#endif
 
 #ifdef GALSF_FB_FIRE_AGE_TRACERS_CUSTOM
         errorFlag += read_agetracerlist(All.AgeTracerListFilename);

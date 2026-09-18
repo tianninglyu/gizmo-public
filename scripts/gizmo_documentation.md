@@ -2825,10 +2825,13 @@ This example sets every strictly-necessary parameter if we are running a non-cos
     %---- (Optional) Initial hydro temperature & temperature floor (in Kelvin)
     InitGasTemp           300	% set by IC file if =0 
     MinGasTemp             10.	% don't set <10 in explicit feedback runs, otherwise 0
+    CoolingRedshift        0.0    % fixed cooling-background redshift for non-cosmological runs
 
 **InitGasTemp** (or `Initial_Gas_Temperature`): This sets the initial gas temperature in Kelvin when initial conditions are read. If the temperature is below 1e4 K, a mean molecular weight corresponding to neutral gas of primordial abundance is assumed, otherwise complete ionisation is assumed. However, the gas temperature is only set to a certain temperature if InitGasTemp>0 and if at the same time the temperature of the gas particles in the initial conditions file is zero, otherwise the initial gas temperature is given by the value stored in the IC file. (Default: `0`).
 
 **MinGasTemp** (or `Minimum_Gas_Temperature`): The minimum allowed gas temperature in Kelvin (this is converted by the code to a minimum thermal energy per unit mass assuming the mean molecular weight of neutral gas). This may be set to zero in principle, but often it is desirable to prevent the gas from becoming too cold, e.g. for resolution reasons or because of lower limits in the implemented cooling function. (Default: `0`).
+
+**CoolingRedshift** (or `Cooling_Redshift`): The fixed radiation-background redshift used by the built-in cooling module in a non-cosmological run. It selects the UV background interpolated from `TREECOOL` and sets the CMB and approximate UV-background terms used for Compton heating and cooling. Cosmological runs ignore this value and continue to use the redshift derived from the current scale factor. (Default: `0`).
 
 
     %---- Hydro reconstruction (kernel) parameters

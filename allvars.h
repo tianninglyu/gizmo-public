@@ -1979,6 +1979,9 @@ extern struct global_data_all_processes
   double InitGasTemp;		/*!< may be used to set the temperature in the IC's */
   double InitGasU;		/*!< the same, but converted to thermal energy per unit mass */
   double MinGasTemp;		/*!< may be used to set a floor for the gas temperature */
+#ifdef COOLING
+  double CoolingRedshift;       /*!< background redshift used by cooling in non-cosmological runs */
+#endif
 #ifdef CHIMES
   int ChimesThermEvolOn;        /*!< Flag to determine whether to evolve the temperature in CHIMES. */
 #ifdef CHIMES_STELLAR_FLUXES

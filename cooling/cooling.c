@@ -36,6 +36,15 @@ static float *SpCoolTable0, *SpCoolTable1;
 static double J_UV = 0, gJH0 = 0, gJHep = 0, gJHe0 = 0, epsH0 = 0, epsHep = 0, epsHe0 = 0;
 #endif
 
+/* Return the redshift associated with the radiation background used by cooling.
+ * Cosmological integrations follow the current scale factor; isolated runs use
+ * the fixed value supplied by the CoolingRedshift runtime parameter. */
+static double get_cooling_background_redshift(void)
+{
+    if(All.ComovingIntegrationOn) {return 1.0 / All.Time - 1.0;}
+    return All.CoolingRedshift;
+}
+
 #if defined(CHIMES)
 int ChimesEqmMode, ChimesUVBMode, ChimesInitIonState, N_chimes_full_output_freq, Chimes_incl_full_output = 1;
 double chimes_rad_field_norm_factor, shielding_length_factor, cr_rate;
@@ -1468,21 +1477,7 @@ void IonizeParamsTable(void)
     double logz, dzlow, dzhi;
     double redshift;
 
-    if(All.ComovingIntegrationOn)
-        {redshift = 1 / All.Time - 1;}
-    else
-    {
-        /* in non-cosmological mode, still use, but adopt z=0 background */
-#ifdef RT_ISRF_BACKGROUND
-	redshift = All.RadiationBackgroundRedshift;
-#else
-        redshift = 0;
-#endif
-        /*
-         gJHe0 = gJHep = gJH0 = epsHe0 = epsHep = epsH0 = J_UV = 0;
-         return;
-         */
-    }
+    redshift = get_cooling_background_redshift();
 
     logz = log10(redshift + 1.0);
     ilow = 0;
@@ -2064,7 +2059,7 @@ MyFloat get_FUV_G0(int target, MyFloat shieldfac, int mode)
     } // uvb contribution //
 #endif
 #endif
-    double column = evaluate_NH_from_GradRho(P[target].GradRho, PPP[target].Hsml, SphP[target].Density, PPP[target].NumNgb, 1, target) * UNIT_SURFDEN_IN_CGS; // converts to cgs    
+    double column = evaluate_NH_from_GradRho(SphP[target].Gradients.Density, PPP[target].Hsml, SphP[target].Density, PPP[target].NumNgb, 1, target) * UNIT_SURFDEN_IN_CGS; // converts to cgs
 #ifdef RT_PHOTOELECTRIC
     G0 += SphP[target].Rad_E_gamma[RT_FREQ_BIN_PHOTOELECTRIC] * (SphP[target].Density * All.cf_a3inv / P[target].Mass) * UNIT_EGY_DENSITY_IN_HABING; // convert to Habing field //
 #endif
@@ -2128,10 +2123,11 @@ double evaluate_Compton_heating_cooling_rate(int target, double T, double nHcgs,
     double Lambda = 0;
     double compton_prefac_eV = 2.16e-35 / nHcgs; // multiply field in eV/cm^3 by this and temperature difference to obtain rate
 
-    double e_CMB_eV=0.262*All.cf_a3inv/All.cf_atime, T_cmb = 2.73/All.cf_atime; // CMB [energy in eV/cm^3, T in K]
+    double z_background = get_cooling_background_redshift(), a_background = 1.0 / (1.0 + z_background);
+    double e_CMB_eV=0.262*pow(1.0+z_background,4), T_cmb = 2.73*(1.0+z_background); // CMB [energy in eV/cm^3, T in K]
     Lambda += compton_prefac_eV * n_elec * e_CMB_eV * (T-T_cmb);
 
-    double e_UVB_eV = shielding_factor_for_exgalbg * 7.8e-3 * pow(All.cf_atime,3.9)/(1.+pow(DMAX(-1.+1./All.cf_atime,0.001)/1.7,4.4)); // this comes from the cosmic optical+UV backgrounds. small correction, so treat simply, and ignore when self-shielded.
+    double e_UVB_eV = shielding_factor_for_exgalbg * 7.8e-3 * pow(a_background,3.9)/(1.+pow(DMAX(z_background,0.001)/1.7,4.4)); // this comes from the cosmic optical+UV backgrounds. small correction, so treat simply, and ignore when self-shielded.
     Lambda += compton_prefac_eV * n_elec * e_UVB_eV * (T-2.e4); // assume very crude approx Compton temp ~2e4 for UVB
     
 #if defined(RADTRANSFER) || defined(RT_USE_GRAVTREE_SAVE_RAD_ENERGY) // use actual explicitly-evolved radiation field, if possible
@@ -2219,17 +2215,12 @@ double evaluate_Compton_heating_cooling_rate(int target, double T, double nHcgs,
 /* this function defines an effective background radiation temperature for purposes of computing the emission corrections above */
 double get_background_radiation_temperature_for_emission_corrections(int target)
 {
-    double T_cmb = 2.73/All.cf_atime;
-#ifdef RT_ISRF_BACKGROUND
-    if(!All.ComovingIntegrationOn) {T_cmb *= 1.+All.RadiationBackgroundRedshift;}
-#endif
+    double z_background = get_cooling_background_redshift();
+    double T_cmb = 2.73*(1.0+z_background);
 #if defined(RT_INFRARED)
     if(target >= 0)
     {
-        double e_tmp_CMB = 0.262*All.cf_a3inv/All.cf_atime;
-#ifdef RT_ISRF_BACKGROUND
-        if(!All.ComovingIntegrationOn) {e_tmp_CMB *= pow(1.+All.RadiationBackgroundRedshift,4);}
-#endif
+        double e_tmp_CMB = 0.262*pow(1.0+z_background,4);
         double e_tot_to_evol_eVcgs = (SphP[target].Density*All.cf_a3inv/P[target].Mass) * UNIT_PRESSURE_IN_EV;
         double e_tmp_IR = SphP[target].Rad_E_gamma_Pred[RT_FREQ_BIN_INFRARED] * e_tot_to_evol_eVcgs, T_tmp_IR = SphP[target].Radiation_Temperature;
         return (e_tmp_IR * T_tmp_IR + e_tmp_CMB * T_cmb) / (e_tmp_IR + e_tmp_CMB); // if evolving IR band, use sum of it plus cmb for background
