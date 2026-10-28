@@ -222,7 +222,7 @@ void set_non_standard_physics_for_current_time(void)
 
 #if defined(COOL_METAL_LINES_BY_SPECIES) && !defined(CHIMES)
     /* load the metal-line cooling tables appropriate for the UV background */
-    if(All.ComovingIntegrationOn) {LoadMultiSpeciesTables();}
+    LoadMultiSpeciesTables();
 #endif
 
 #if defined(GALSF_SFR_IMF_SAMPLING_DISTRIBUTE_SF)

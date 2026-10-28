@@ -6,6 +6,8 @@
 #include "../allvars.h"
 #include "../proto.h"
 #include "./cooling.h"
+#include "./species_table_redshift.h"
+#include "./uvb_table_redshift.h"
 
 /*
  * This file contains the routines for optically-thin cooling (generally aimed towards simulations of the ISM,
@@ -1309,7 +1311,7 @@ void InitCoolMemory(void)
 #ifdef COOL_METAL_LINES_BY_SPECIES
     long i_nH=41; long i_T=176; long kspecies=(long)NUM_LIVE_SPECIES_FOR_COOLTABLES;
     SpCoolTable0 = (float *) mymalloc("SpCoolTable0",(kspecies*i_nH*i_T)*sizeof(float));
-    if(All.ComovingIntegrationOn) {SpCoolTable1 = (float *) mymalloc("SpCoolTable1",(kspecies*i_nH*i_T)*sizeof(float));}
+    SpCoolTable1 = (float *) mymalloc("SpCoolTable1",(kspecies*i_nH*i_T)*sizeof(float));
 #endif
 }
 
@@ -1351,22 +1353,13 @@ void MakeCoolingTable(void)
 
 void LoadMultiSpeciesTables(void)
 {
-    if(All.ComovingIntegrationOn) {
-        int i;
-        double z;
-        if(All.Time==All.TimeBegin) {
-            All.SpeciesTableInUse=48;
-            ReadMultiSpeciesTables(All.SpeciesTableInUse);
-        }
-        z=log10(1/All.Time)*48;
-        i=(int)z;
-        if(i<48) {
-            if(i<All.SpeciesTableInUse) {
-                All.SpeciesTableInUse=i;
-                ReadMultiSpeciesTables(All.SpeciesTableInUse);
-            }}
-    } else {
-        if(All.Time==All.TimeBegin) ReadMultiSpeciesTables(0);
+    static int loaded_table = -1;
+    int table = species_cooling_table_redshift(get_cooling_background_redshift()).lower;
+
+    if(table != loaded_table) {
+        ReadMultiSpeciesTables(table);
+        All.SpeciesTableInUse = table;
+        loaded_table = table;
     }
 }
 
@@ -1379,14 +1372,13 @@ void ReadMultiSpeciesTables(int iT)
 
     fname=GetMultiSpeciesFilename(iT,0);
     if(ThisTask == 0) printf(" ..opening Cooling Table %s \n",fname);
-    if(!(fdcool = fopen(fname, "r"))) {
+    if(!(fdcool = fopen(fname, "rb"))) {
         printf(" Cannot read species cooling table in file `%s'\n", fname); endrun(456);}
     for(i=0;i<kspecies;i++) {
         for(j=0;j<i_nH;j++) {
             for(k=0;k<i_Temp;k++) {
                 r=fread(&SpCoolTable0[i*i_nH*i_Temp + j*i_Temp + k],sizeof(float),1,fdcool);
-                if(r!=1) {printf(" Reached Cooling EOF! \n");
-                }
+                if(r!=1) {printf(" Incomplete species cooling table `%s'\n", fname); endrun(456);}
             }}}
     fclose(fdcool);
     /*
@@ -1400,17 +1392,16 @@ void ReadMultiSpeciesTables(int iT)
      fread(&SpCoolTable0_He[i][j][k][l],sizeof(float),1,fdcool);
      fclose(fdcool);
      */
-    if (All.ComovingIntegrationOn && i<48) {
+    if (iT < 48) {
         fname=GetMultiSpeciesFilename(iT+1,0);
         if(ThisTask == 0) printf(" ..opening (z+) Cooling Table %s \n",fname);
-        if(!(fdcool = fopen(fname, "r"))) {
+        if(!(fdcool = fopen(fname, "rb"))) {
             printf(" Cannot read species 1 cooling table in file `%s'\n", fname); endrun(456);}
         for(i=0;i<kspecies;i++) {
             for(j=0;j<i_nH;j++) {
                 for(k=0;k<i_Temp;k++) {
                     r=fread(&SpCoolTable1[i*i_nH*i_Temp + j*i_Temp + k],sizeof(float),1,fdcool);
-                    if(r!=1) {printf(" Reached Cooling EOF! \n");
-                    }
+                    if(r!=1) {printf(" Incomplete species cooling table `%s'\n", fname); endrun(456);}
                 }}}
         fclose(fdcool);
         /*
@@ -1454,12 +1445,28 @@ static int nheattab;		/* length of table */
 
 void ReadIonizeParams(char *fname)
 {
-    int i; FILE *fdcool;
-    if(!(fdcool = fopen(fname, "r"))) {printf(" Cannot read ionization table in file `%s'. Make sure the correct TREECOOL file is placed in the code run-time directory, and that any leading comments (e.g. lines preceded by ##) are deleted from the file.\n", fname); endrun(456);}
+    int i; FILE *fdcool; char line[512];
+    if(!(fdcool = fopen(fname, "r"))) {printf(" Cannot read ionization table in file `%s'. Make sure TREECOOL is in the run-time directory.\n", fname); endrun(456);}
     for(i=0; i<TABLESIZE; i++) {inlogz[i]=100; gH0[i]=0; gHe[i]=0; gHep[i]=0; eH0[i]=0; eHe[i]=0; eHep[i]=0;}
-    for(i=0; i<TABLESIZE; i++) {if(fscanf(fdcool, "%g %lg %lg %lg %lg %lg %lg", &inlogz[i], &gH0[i], &gHe[i], &gHep[i], &eH0[i], &eHe[i], &eHep[i]) == EOF) {break;}}
+    nheattab = 0;
+    while(fgets(line, sizeof(line), fdcool)) {
+        char *entry = line + strspn(line, " \t\r\n");
+        if(*entry == '\0' || *entry == '#') continue;
+        if(nheattab >= TABLESIZE) {printf(" Too many UV background records in `%s'.\n", fname); endrun(456);}
+        i = nheattab;
+        if(sscanf(entry, "%g %lg %lg %lg %lg %lg %lg", &inlogz[i], &gH0[i], &gHe[i], &gHep[i], &eH0[i], &eHe[i], &eHep[i]) != 7) {
+            printf(" Invalid UV background record in `%s': %s", fname, line); endrun(456);
+        }
+        if(!isfinite(inlogz[i]) || !isfinite(gH0[i]) || !isfinite(gHe[i]) || !isfinite(gHep[i]) ||
+           !isfinite(eH0[i]) || !isfinite(eHe[i]) || !isfinite(eHep[i]) ||
+           gH0[i] <= 0 || gHe[i] <= 0 || gHep[i] <= 0 || eH0[i] <= 0 || eHe[i] <= 0 || eHep[i] <= 0) {
+            printf(" UV background redshifts and rates in `%s' must be finite, with positive rates.\n", fname); endrun(456);
+        }
+        nheattab++;
+    }
     fclose(fdcool);
-    for(i=0, nheattab=0; i<TABLESIZE; i++) {if(gH0[i] != 0.0) {nheattab++;} else {break;}} /*  nheattab is the number of entries in the table */
+    if(nheattab < 2) {printf(" Fewer than two valid UV background records in `%s'.\n", fname); endrun(456);}
+    for(i=1; i<nheattab; i++) {if(inlogz[i] <= inlogz[i-1]) {printf(" UV background redshifts in `%s' must increase strictly.\n", fname); endrun(456);}}
     if(ThisTask == 0) printf(" ..read ionization table [TREECOOL] with %d non-zero UVB entries in file `%s'. Make sure to cite the authors from which the UV background was compiled! (See user guide for the correct references).\n", nheattab, fname);
 }
 
@@ -1473,33 +1480,32 @@ void IonizeParams(void)
 
 void IonizeParamsTable(void)
 {
-    int i, ilow, ihi;
+    int ilow, ihi;
     double logz, dzlow, dzhi;
     double redshift;
+    UVBTableRedshift selection;
 
     redshift = get_cooling_background_redshift();
 
     logz = log10(redshift + 1.0);
-    ilow = 0;
-    if(nheattab <= 0) {gJHe0 = gJHep = gJH0 = epsHe0 = epsHep = epsH0 = J_UV = 0; return;}
-    for(i=0; i<nheattab; i++) {if(inlogz[i] < logz) {ilow = i;} else {break;}}
-    ihi = i + 1;
-    if(ilow >= nheattab) {ihi = i;}
-    dzlow = logz - inlogz[ilow];
-    dzhi = inlogz[ihi] - logz;
-    if((logz > inlogz[nheattab - 1]) || (gH0[ilow] == 0) || (gH0[ihi] == 0) || (ilow > nheattab))
+    selection = uvb_table_redshift(logz, inlogz, nheattab);
+    ilow = selection.lower;
+    ihi = selection.upper;
+    dzlow = selection.upper_weight;
+    dzhi = 1.0 - dzlow;
+    if(selection.beyond_max || (gH0[ilow] == 0) || (gH0[ihi] == 0))
     {
         gJHe0 = gJHep = gJH0 = epsHe0 = epsHep = epsH0 = J_UV = 0;
         return;
     }
     else {J_UV = 1.e-21;}		/* irrelevant as long as it's not 0 */
 
-    gJH0 = JAMPL * pow(10., (dzhi * log10(gH0[ilow]) + dzlow * log10(gH0[ihi])) / (dzlow + dzhi));
-    gJHe0 = JAMPL * pow(10., (dzhi * log10(gHe[ilow]) + dzlow * log10(gHe[ihi])) / (dzlow + dzhi));
-    gJHep = JAMPL * pow(10., (dzhi * log10(gHep[ilow]) + dzlow * log10(gHep[ihi])) / (dzlow + dzhi));
-    epsH0 = JAMPL * pow(10., (dzhi * log10(eH0[ilow]) + dzlow * log10(eH0[ihi])) / (dzlow + dzhi));
-    epsHe0 = JAMPL * pow(10., (dzhi * log10(eHe[ilow]) + dzlow * log10(eHe[ihi])) / (dzlow + dzhi));
-    epsHep = JAMPL * pow(10., (dzhi * log10(eHep[ilow]) + dzlow * log10(eHep[ihi])) / (dzlow + dzhi));
+    gJH0 = JAMPL * pow(10., dzhi * log10(gH0[ilow]) + dzlow * log10(gH0[ihi]));
+    gJHe0 = JAMPL * pow(10., dzhi * log10(gHe[ilow]) + dzlow * log10(gHe[ihi]));
+    gJHep = JAMPL * pow(10., dzhi * log10(gHep[ilow]) + dzlow * log10(gHep[ihi]));
+    epsH0 = JAMPL * pow(10., dzhi * log10(eH0[ilow]) + dzlow * log10(eH0[ihi]));
+    epsHe0 = JAMPL * pow(10., dzhi * log10(eHe[ilow]) + dzlow * log10(eHe[ihi]));
+    epsHep = JAMPL * pow(10., dzhi * log10(eHep[ilow]) + dzlow * log10(eHep[ihi]));
 
     return;
 }
@@ -1682,7 +1688,8 @@ double GetCoolingRateWSpecies(double nHcgs, double logT, double *Z)
     int ix0, iy0, ix1, iy1;
     double dx, dy, dz, mdz;
     long i_T=iymax+1, inHT=i_T*(ixmax+1);
-    if(All.ComovingIntegrationOn && All.SpeciesTableInUse<48) {dz=log10(1/All.Time)*48; dz=dz-(int)dz; mdz=1-dz;} else {dz=0; mdz=1;}
+    dz=species_cooling_table_redshift(get_cooling_background_redshift()).upper_weight;
+    mdz=1-dz;
 
     dx = (log10(nHcgs)-(-8.0))/(0.0-(-8.0))*ixmax;
     dy = (logT-2.0)/(9.0-2.0)*iymax;
@@ -1966,15 +1973,12 @@ double get_equilibrium_dust_temperature_estimate(int i, double shielding_factor_
     if(i >= 0) {return SphP[i].Dust_Temperature;} // this is pre-computed -- simply return it
 #endif
     /* simple three-component model [can do fancier] with cmb, dust, high-energy photons */
-    double e_CMB=0.262*All.cf_a3inv/All.cf_atime, T_cmb=2.73/All.cf_atime; // CMB [energy in eV/cm^3, T in K]
+    double z_background = get_cooling_background_redshift();
+    double e_CMB=0.262*pow(1.+z_background,4), T_cmb=2.73*(1.+z_background); // CMB [energy in eV/cm^3, T in K]
     double e_IR=0.31, Tdust_ext=DMAX(30.,T_cmb); // Milky way ISRF from Draine (2011), assume peak of dust emission at ~100 microns
     double e_HiEgy=0.66, T_hiegy=5800.; // Milky way ISRF from Draine (2011), assume peak of stellar emission at ~0.6 microns [can still have hot dust, this effect is pretty weak]
 #ifdef RT_ISRF_BACKGROUND
     e_IR *= All.InterstellarRadiationFieldStrength; e_HiEgy *= All.InterstellarRadiationFieldStrength; // need to re-scale the assumed ISRF components
-    if(!All.ComovingIntegrationOn){
-	e_CMB *= pow(1.+All.RadiationBackgroundRedshift,4);
- 	T_cmb *= (1.+All.RadiationBackgroundRedshift);
-    }
 #endif
 
     if(i >= 0)

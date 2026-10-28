@@ -2271,7 +2271,15 @@ void read_parameter_file(char *fname)
 #if defined(RT_ISRF_BACKGROUND)
                 if(strcmp("InterstellarRadiationFieldStrength",tag[i])==0) {*((double *)addr[i])=1.0; printf("Tag %s (%s) not set in parameter file: defaulting to assuming Solar neighborhood (Draine) background radiation field (=%g) \n",tag[i],alternate_tag[i],All.InterstellarRadiationFieldStrength); continue;}
 
-                if(strcmp("Redshift_RT_Background",tag[i])==0) {*((double *)addr[i])=0.0; printf("Tag %s (%s) not set in parameter file: defaulting to assuming z=0 background radiation field \n",tag[i],alternate_tag[i]); continue;}
+                if(strcmp("Redshift_RT_Background",tag[i])==0) {
+#ifdef COOLING
+                    *((double *)addr[i]) = All.ComovingIntegrationOn ? 0.0 : All.CoolingRedshift;
+#else
+                    *((double *)addr[i]) = 0.0;
+#endif
+                    printf("Tag %s (%s) not set in parameter file: defaulting to z=%g background radiation field \n",tag[i],alternate_tag[i],All.RadiationBackgroundRedshift);
+                    continue;
+                }
 #endif
 #if defined(TURB_DRIVING)
                 if(strcmp("ST_DtFreq",tag[i])==0) {*((double *)addr[i])=-1; printf("Tag %s (%s) not set in parameter file: defaulting to update turbulent driving fields every 0.01 coherence times (=%g) \n",tag[i],alternate_tag[i],All.TurbDriving_Global_DtTurbUpdates); continue;}
@@ -2293,9 +2301,9 @@ void read_parameter_file(char *fname)
         }
 
 #ifdef COOLING
-        if((All.ComovingIntegrationOn == 0) && (All.CoolingRedshift < 0))
+        if((All.ComovingIntegrationOn == 0) && (!isfinite(All.CoolingRedshift) || All.CoolingRedshift < 0))
         {
-            printf("ERROR. CoolingRedshift must be non-negative for a non-cosmological simulation (received %g).\n", All.CoolingRedshift);
+            printf("ERROR. CoolingRedshift must be finite and non-negative for a non-cosmological simulation (received %g).\n", All.CoolingRedshift);
             errorFlag = 1;
         }
 #endif
